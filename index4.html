@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 가위바위보 게임</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        /* 기본 스타일 */
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            flex-direction: column;
+        }
+        .main-card {
+            background-color: white;
+            padding: 30px;
+            border-radius: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            text-align: center;
+            width: 90%;
+            max-width: 450px;
+            position: relative;
+            min-height: 500px; /* 고정 높이 확보 */
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            align-items: center;
+        }
+        h1 { color: #333; margin-bottom: 20px; font-size: 22px; }
+        
+        /* 버튼 스타일 */
+        .btn-primary {
+            background-color: #4e73df; color: white; border: none;
+            padding: 12px 35px; font-size: 18px; font-weight: bold;
+            border-radius: 50px; cursor: pointer; transition: all 0.2s ease;
+            box-shadow: 0 4px 6px rgba(78, 115, 223, 0.3);
+        }
+        .btn-primary:hover { background-color: #2e59d9; transform: translateY(-2px); }
+        .btn-primary:disabled { background-color: #a0aec0; cursor: not-allowed; transform: none; }
+
+        /* 화면 요소 숨김 처리 */
+        .hidden { display: none !important; }
+
+        /* 게임 영역 스타일 */
+        #game-area {
+            position: relative;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #webcam-container {
+            border-radius: 15px; overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            line-height: 0;
+            margin-bottom: 15px;
+        }
+        
+        /* 카운트다운 스타일 */
+        #countdown-display {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 80px; font-weight: 900; color: #fff;
+            text-shadow: 2px 2px 10px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+
+        /* 결과 화면 스타일 */
+        #result-screen {
+            width: 100%;
+            animation: fadeIn 0.5s ease;
+        }
+        .result-box {
+            background: #f8f9fc;
+            border-radius: 15px;
+            padding: 15px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: bold;
+            font-size: 18px;
+        }
+        .move-icon { font-size: 30px; }
+        
+        /* 최종 결과 (WIN/LOSE) 텍스트 */
+        #final-outcome {
+            font-size: 40px;
+            font-weight: 900;
+            margin: 20px 0;
+        }
+        .outcome-win { color: #1cc88a; } /* 초록색 */
+        .outcome-lose { color: #e74a3b; } /* 빨간색 */
+        .outcome-draw { color: #f6c23e; } /* 노란색 */
+        
+        .loading-msg { color: #666; font-size: 14px; margin-top: 10px; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+
+    <div class="main-card">
+        <h1>🤖 AI 가위바위보 대결</h1>
+
+        <div id="start-screen">
+            <p style="color:#666; margin-bottom: 30px;">카메라 앞에서 준비하시고<br>시작 버튼을 눌러주세요!</p>
+            <button type="button" class="btn-primary" onclick="startGame()" id="start-btn" disabled>로딩 중...</button>
+            <p class="loading-msg" id="loading-status">모델을 불러오는 중입니다...</p>
+        </div>
+
+        <div id="game-area" class="hidden">
+            <div id="webcam-container"></div>
+            <div id="countdown-display" class="hidden"></div>
+            <p style="color:#666; font-size:14px;">카운트가 끝나면 손을 멈추세요!</p>
+        </div>
+
+        <div id="result-screen" class="hidden">
+            <div class="result-box">
+                <span>나의 선택</span>
+                <span id="user-move-display">-</span>
+            </div>
+            <div class="result-box" style="background:#edf2ff;">
+                <span>컴퓨터 선택</span>
+                <span id="computer-move-display">-</span>
+            </div>
+            
+            <div id="final-outcome"></div>
+            <p style="color:#888; font-size:14px;">잠시 후 초기 화면으로 돌아갑니다.</p>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    <script type="text/javascript">
+        // --- 설정 부분 ---
+        // 여기에 여러분의 Teachable Machine 모델 주소를 넣으세요.
+        const URL = "https://teachablemachine.withgoogle.com/models/VCE0P0TSD/";
+        
+        // [중요] 티처블 머신에서 학습시킨 클래스 이름과 정확히 일치해야 합니다!
+        const CLASS_NAMES = {
+            ROCK: "바위", // 또는 "Rock"
+            PAPER: "보",   // 또는 "Paper"
+            SCISSORS: "가위" // 또는 "Scissors"
+        };
+
+        // 이모지 매핑 (화면 표시용)
+        const EMOJI_MAP = {
+            [CLASS_NAMES.ROCK]: "✊ 바위",
+            [CLASS_NAMES.PAPER]: "🖐 보",
+            [CLASS_NAMES.SCISSORS]: "✌️ 가위"
+        };
+        // ----------------
+
+        let model, webcam, maxPredictions;
+        let isModelLoaded = false;
+
+        // 1. 페이지 로드 시 모델과 웹캠을 미리 준비합니다.
+        async function init() {
+            const statusMsg = document.getElementById("loading-status");
+            const startBtn = document.getElementById("start-btn");
+
+            try {
+                const modelURL = URL + "model.json";
+                const metadataURL = URL + "metadata.json";
+                model = await tmImage.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+
+                statusMsg.innerText = "웹캠 권한을 허용해주세요...";
+                const flip = true;
+                webcam = new tmImage.Webcam(250, 250, flip); // 크기 약간 키움
+                await webcam.setup();
+                await webcam.play();
+                window.requestAnimationFrame(loop);
+
+                document.getElementById("webcam-container").appendChild(webcam.canvas);
+                
+                isModelLoaded = true;
+                startBtn.disabled = false;
+                startBtn.innerText = "게임 시작!";
+                statusMsg.innerText = "준비 완료!";
+                statusMsg.style.color = "#1cc88a";
+
+            } catch (error) {
+                statusMsg.innerText = "오류 발생! (웹캠 권한을 확인하세요)";
+                statusMsg.style.color = "red";
+                console.error(error);
+            }
+        }
+
+        // 웹캠 화면을 계속 업데이트 (예측은 하지 않음)
+        async function loop() {
+            webcam.update();
+            window.requestAnimationFrame(loop);
+        }
+
+        // 2. 게임 시작 버튼 클릭 시
+        function startGame() {
+            if (!isModelLoaded) return;
+
+            // 화면 전환
+            document.getElementById("start-screen").classList.add("hidden");
+            document.getElementById("game-area").classList.remove("hidden");
+            document.getElementById("result-screen").classList.add("hidden");
+
+            // 카운트다운 시작
+            runCountdown();
+        }
+
+        // 3. 3-2-1 카운트다운
+        function runCountdown() {
+            const countdownDisplay = document.getElementById("countdown-display");
+            countdownDisplay.classList.remove("hidden");
+            
+            let count = 3;
+            countdownDisplay.innerText = count;
+            
+            const timer = setInterval(() => {
+                count--;
+                if (count > 0) {
+                    countdownDisplay.innerText = count;
+                } else {
+                    clearInterval(timer);
+                    countdownDisplay.innerText = ""; // 숫자 숨김
+                    countdownDisplay.classList.add("hidden");
+                    playRound(); // 게임 판정 시작
+                }
+            }, 1000); // 1초 간격
+        }
+
+        // 4. 실제 게임 판정 (순간 포착)
+        async function playRound() {
+            // 사용자 손 모양 예측 (가장 높은 확률의 클래스 가져오기)
+            const prediction = await model.predict(webcam.canvas);
+            let userMove = "";
+            let maxProb = 0;
+            
+            for (let i = 0; i < maxPredictions; i++) {
+                if (prediction[i].probability > maxProb) {
+                    maxProb = prediction[i].probability;
+                    userMove = prediction[i].className;
+                }
+            }
+
+            // 컴퓨터 랜덤 선택
+            const computerMoves = [CLASS_NAMES.ROCK, CLASS_NAMES.PAPER, CLASS_NAMES.SCISSORS];
+            const computerMove = computerMoves[Math.floor(Math.random() * computerMoves.length)];
+
+            // 승패 결정
+            const result = determineWinner(userMove, computerMove);
+
+            // 결과 화면 표시
+            showResult(userMove, computerMove, result);
+        }
+
+        // 승패 판정 로직
+        function determineWinner(user, computer) {
+            if (user === computer) {
+                return "DRAW";
+            }
+            if (
+                (user === CLASS_NAMES.ROCK && computer === CLASS_NAMES.SCISSORS) ||
+                (user === CLASS_NAMES.PAPER && computer === CLASS_NAMES.ROCK) ||
+                (user === CLASS_NAMES.SCISSORS && computer === CLASS_NAMES.PAPER)
+            ) {
+                return "WIN";
+            }
+            return "LOSE";
+        }
+
+        // 5. 결과 화면 출력 및 초기화 예약
+        function showResult(userMove, computerMove, result) {
+            document.getElementById("game-area").classList.add("hidden");
+            document.getElementById("result-screen").classList.remove("hidden");
+
+            // 선택 결과 표시 (이모지 매핑 사용)
+            document.getElementById("user-move-display").innerText = EMOJI_MAP[userMove] || userMove;
+            document.getElementById("computer-move-display").innerText = EMOJI_MAP[computerMove] || computerMove;
+
+            const outcomeText = document.getElementById("final-outcome");
+            outcomeText.className = ""; // 기존 클래스 초기화
+
+            if (result === "WIN") {
+                outcomeText.innerText = "🎉 WIN!";
+                outcomeText.classList.add("outcome-win");
+            } else if (result === "LOSE") {
+                outcomeText.innerText = "😭 LOSE...";
+                outcomeText.classList.add("outcome-lose");
+            } else {
+                outcomeText.innerText = "🤝 DRAW";
+                outcomeText.classList.add("outcome-draw");
+            }
+
+            // 3초 후 초기 화면으로 리셋
+            setTimeout(() => {
+                document.getElementById("result-screen").classList.add("hidden");
+                document.getElementById("start-screen").classList.remove("hidden");
+            }, 3000);
+        }
+
+        // 페이지 로드 시 초기화 함수 실행
+        init();
+
+    </script>
+</body>
+</html>
